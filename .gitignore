@@ -1,6 +1,7 @@
 /deps/shellspec/
 /.shellspec-local
 /.shellspec-quick.log
+/tmp/
 /report/
 /coverage/
 /output/

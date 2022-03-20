@@ -94,12 +94,13 @@ DOWNLOADED = $(SHELLSPEC_BASE_INSTALL_DIR)
 
 define GENERATE_SHELLSPEC_TESTS_RULE
 
-$(1): $(SHELLSPEC) $(SHELLSPEC_OUTPUT_DIRS) $(2) $(wildcard spec/*_spec.sh) \
-                                                 $(wildcard spec/*_helper.sh) \
-                              $(foreach dep_file,$(wildcard spec/*_spec.deps),$(shell $(CAT) $(dep_file)))
+$(1): $(SHELLSPEC) $(SHELLSPEC_OUTPUT_DIRS) $(2) \
+                         $(wildcard spec/*_spec.sh) \
+                         $(wildcard spec/*_helper.sh) \
+      $(foreach dep_file,$(wildcard spec/*_spec.deps),$(shell $(CAT) $(dep_file)))
 	$(call SH__ENABLE_PIPEFAIL_FOR_COMMAND,\
 		($(SHELLSPEC) --color | $(TEE) $(SHELLSPEC_OUTPUT_LOG)) || \
-			($(RM) -f $(SHELLSPEC_OUTPUT_LOG) ; exit 1)\
+		($(RM) -f $(SHELLSPEC_OUTPUT_LOG) ; exit 1)\
 	)
 
 
