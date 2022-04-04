@@ -7,6 +7,9 @@
 PROJECT_BASE_PATH                   := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
 PROJECT_PREFERED_COMMAND_RESOLUTION := FN__PREFER_EXECUTABLE_FILE_WHICH
+# Added to list of `.` and `..` to remove from directory search results
+# using FN__FIND_SUBDIRS_IN and FN__SEARCH_DIR_FOR_PATTERN.
+SPECIAL_DIRS_TO_IGNORE              := .git
 
 
 include $(PROJECT_BASE_PATH)/func_lib.mk
@@ -40,7 +43,7 @@ SHELLSPEC_BIN_DIR           = $(SHELLSPEC_BASE_INSTALL_DIR)/bin
 SHELLSPEC_INSTALL_DIR       = $(SHELLSPEC_BASE_INSTALL_DIR)/lib
 SHELLSPEC_INSTALLER_URL     = https://git.io/shellspec
 SHELLSPEC_VERSION_FILE      = $(DEPS_DIR)/shellspec.ver_lock
-$(call FN__DEFINE_ON_FIRST_USE,SHELLSPEC_VERSION,$(call FN__DEBUGABLE_SUBSHELL,$(CAT) $(SHELLSPEC_VERSION_FILE)))
+$(call FN__DEFINE_ON_FIRST_USE,SHELLSPEC_VERSION,$(DOLLARS)$(OPEN_PAREN)call FN__DEBUGABLE_SUBSHELL$(COMMA)$(DOLLARS)$(OPEN_PAREN)CAT$(CLOSE_PAREN) $(SHELLSPEC_VERSION_FILE)$(CLOSE_PAREN))
 SHELLSPEC                   = $(call FN__SIMPLIFY_EXECUTABLE_PATHS,$(SHELLSPEC_BIN_DIR)/shellspec)
 SHELLSPEC_PATH              = $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_BIN_DIR)/shellspec)
 SHELLSPEC_OPTIONS           = --color
@@ -53,12 +56,24 @@ SHELLSPEC_ALL_LOGFILES      = $(SHELLSPEC_SUCCESS_LOGFILE) $(SHELLSPEC_FAILURE_L
 
 # DOWNLOAD_URL_TO_STDOUT autodetects the presence of `curl` or `wget` and
 # produces the correct options to output the contents of the file at the
-# provided URL to stdout:
-# (DOWNLOAD_URL_TO_STDOUT_PATH just the path of the binary)
-DOWNLOAD_URL_TO_STDOUT_PATH = $(firstword $(CURL_PATH) $(WGET_PATH))
-DOWNLOAD_URL_TO_STDOUT      = $(if $(CURL_PATH),$(CURL) -fsSL,$(if $(WGET_PATH),$(WGET) -O-,))
+# provided URL to stdout. (DOWNLOAD_URL_TO_STDOUT_PATH just the path of the binary)
+# NOTE: Using `_PATH` variant of macro to prevent duplicate `$(error ...)` race
+# condition.
+DOWNLOAD_URL_TO_STDOUT_PATH = $(if $(CURL_PATH),$(CURL_PATH),$(WGET_PATH))
+DOWNLOAD_URL_TO_STDOUT      = \
+	$(call \
+		FN__VERIFY_COMMAND_PRESENT_WITH_CUSTOM_ERROR_MESSAGE,$\
+		DOWNLOAD_URL_TO_STDOUT,$\
+		Either curl or wget must be installed to install ShellSpec via https. $\
+			Neither binary found in current PATH.$\
+	)$(if \
+		$(CURL_PATH),$\
+		$(call FN__SIMPLIFY_EXECUTABLE_PATHS,$(CURL_PATH)) -fsSL,$\
+		$(if $(WGET_PATH),$(call FN__SIMPLIFY_EXECUTABLE_PATHS,$(WGET_PATH)) -O-,)$\
+	)
 
-# include $(PROJECT_BASE_PATH)/project_info.mk
+
+include $(PROJECT_BASE_PATH)/project_info.mk
 
 
 # PROJECT_DOCKER_BASE_DIR_APPS = docker_base:my_app
@@ -183,11 +198,6 @@ dev_containers:
 
 
 $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_PATH)): $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_VERSION_FILE))
-	$(SILENCE_WHEN_NOT_VERBOSE)# $(call \
-		FN__VERIFY_COMMAND_PRESENT_WITH_CUSTOM_ERROR_MESSAGE,$\
-		DOWNLOAD_URL_TO_STDOUT,$\
-		Either curl or wget must be installed to install ShellSpec via https. Neither binary found in current PATH.$\
-	)
 	$(SILENCE_WHEN_NOT_VERBOSE)# $(call \
 		FN__VERIFY_COMMAND_PRESENT_WITH_CUSTOM_ERROR_MESSAGE,$\
 		GIT,$\

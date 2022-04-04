@@ -1279,6 +1279,131 @@ $(call FN__SIMPLIFY_PATHS,$(1)):
 endef
 
 
+
+
+# FN__IS_NONEMPTY_DIR
+#     True (non-empty string) when the path refers to a non-empty directory
+#   PARAMETERS:
+#     1: The directory to check
+FN__IS_NONEMPTY_DIR = $(if $(wildcard $(1)/*),NON_EMPTY_DIR,)
+
+# FN__IS_DIR
+#     True (non-empty string) when the path refers to a directory
+#   PARAMETERS:
+#     1: The directory to check
+FN__IS_DIR = $(if $(wildcard $(1)/.),DIR,)
+
+# directories to exclude from recursive searches:
+SPECIAL_DIRS_TO_IGNORE := $(sort . .. $(SPECIAL_DIRS_TO_IGNORE))
+
+
+# FN__STRIP_TRAILING_SLASH
+#     Strip trailing slashes from all directories except `\` or
+#     `/.` which are normalized to `/`. Any trailing `/.` is also
+#     removed.
+#   PARAMETERS:
+#     1: List of directories to normalize
+FN__STRIP_TRAILING_SLASH = \
+	$(sort \
+		$(patsubst \
+			%,$\
+			/,$\
+			$(filter / /.,$(1))$\
+		) $(patsubst \
+			%/.,$\
+			%,$\
+			$(patsubst \
+				%/,$\
+				%,$\
+				$(filter-out / /.,$(1))$\
+			)$\
+		)$\
+	)
+
+
+# FN__APPEND_TO_FILEPATH
+#     Roughly this is equivilant to $(1)/$(2), but special care
+#     is taken to avoid double slash or leading `./`. Every directory
+#     in $(1) is combined with every filename/pattern in $(2), so the
+#     word count of the result will be the product of the word count of
+#     the two arguments. 
+#   PARAMETERS:
+#     1: The directory name to append to
+#     2: The filename to be appended
+FN__APPEND_TO_FILEPATH = \
+	$(foreach \
+		each_dir,$\
+		$(call FN__STRIP_TRAILING_SLASH,$(1)),$\
+		$(foreach \
+			each_file,$\
+			$(2),$\
+			$(patsubst \
+				./%,$\
+				%,$\
+				$(patsubst %/,%,$(each_dir))/$(each_file)$\
+			)$\
+		)$\
+	)
+
+
+# FN__FIND_SUBDIRS_IN
+#     Non-recursively find all subdirectories in given directory.
+#     All direcoties in $(SPECIAL_DIRS_TO_IGNORE) are removed from
+#     the resulting list.
+#   PARAMETERS:
+#     1: The directory to search
+FN__FIND_SUBDIRS_IN = \
+	$(filter-out \
+		$(call \
+			FN__APPEND_TO_FILEPATH,$\
+			%,$\
+			$(SPECIAL_DIRS_TO_IGNORE)$\
+		) $(SPECIAL_DIRS_TO_IGNORE),$\
+		$(patsubst \
+			%/.,$\
+			%,$\
+			$(wildcard $(call FN__APPEND_TO_FILEPATH,$(1),*/. .*/.))$\
+		)$\
+	)
+
+# FN__SEARCH_DIR_FOR_PATTERN
+#     Non-recursively find all subdirectories in given directory.
+#     All direcoties in $(SPECIAL_DIRS_TO_IGNORE) are removed from
+#     the resulting list.
+#   PARAMETERS:
+#     1: The directory to search
+#     2: The wildcard filename patter to search for
+#     3: If non-empty, return list of directories, otherwise
+#            return files.
+FN__SEARCH_DIR_FOR_PATTERN = \
+	$(sort \
+		$(foreach \
+			each_subdir,$\
+			$(call FN__FIND_SUBDIRS_IN,$(1)),$\
+			$(call \
+				FN__SEARCH_DIR_FOR_PATTERN,$\
+				$(each_subdir),$\
+				$(if $(2),$(2),*)$\
+			)$\
+		) $(foreach \
+			each_match,$\
+			$(wildcard \
+				$(call \
+					FN__APPEND_TO_FILEPATH,$\
+					$(1),$\
+					$(if $(2),$(2),*)$\
+				)$\
+			),$\
+			$(if \
+				$(call FN__IS_DIR,$(each_match)),$\
+				$(if $(3),$(each_match),),$\
+				$(if $(3),,$(each_match))$\
+			)$\
+		)$\
+	)
+
+
+
 # EVAL__FUNC_LIB_MAKEFILE_FOOTER
 #     Generic Makefile targets supporting above functions:
 
