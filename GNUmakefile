@@ -18,14 +18,6 @@ include $(PROJECT_BASE_PATH)/func_lib.mk
 $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,cat)
 $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,cut)
 $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,curl)
-$(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,docker)
-$(call \
-	FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,$\
-	docker-compose,$\
-	DOCKER_COMPOSE,$\
-	Docker Compose,$\
-	Docker must be installed. docker-compose binary not found in current PATH.$\
-)
 # $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,find)
 $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,git)
 $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,mv)
@@ -71,6 +63,130 @@ DOWNLOAD_URL_TO_STDOUT      = \
 		$(call FN__SIMPLIFY_EXECUTABLE_PATHS,$(CURL_PATH)) -fsSL,$\
 		$(if $(WGET_PATH),$(call FN__SIMPLIFY_EXECUTABLE_PATHS,$(WGET_PATH)) -O-,)$\
 	)
+
+## Docker setup:
+# Like most other commands, we use FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE
+# so an error message is forced if we attempt to run docker when it's not installed
+
+# In addition to verifying the existance of the executables, we have some additional
+# preparation we want to do. As with the other command verification, we ensure they
+# are only done when the current invocation of Make is going to actually use docker
+
+# To do this we make the docker and docker-compose actually defined as DOCKER__INTERNAL
+# and DOCKER_COMPOSE__INTERNAL respectively and proxy to these from aliases.
+
+# As the _PATH macros aren't intended to do any additional validation, they are proxied
+# directly, with no fancy define-on-use mechanism
+
+# The DOCKER and DOCKER_COMPOSE macros both expand $(DOCKER_PREMAKERUN_INITIALIZED)
+# which initiates our docker startup/validation code:
+
+# First we need to insure the docker daemon is running so that docker is
+# ready to use. (This will normally require a sudo, so it isn't worth attempting to
+# start it ourselves.)
+
+# Secondly we want to store the state of any running and non-running containers so
+# we can restore this state after non-destructive operations (like running the test
+# suite). In this case we can delete any containers created exclusively for the
+# non-destructive operations and shut down any containers started under the same
+# circumstances.
+
+# Additionally, the routine to capture the docker container state is generalized into
+# a repeatable function with $(call FN__EVAL__CAPTURE_DOCKER_CONTAINER_STATUS,snapshot_name)
+# so snapshots from different points of time can be compared.
+
+
+DOCKER_PS_CONTAINER_PROPERTIES = Command CreatedAt ID Image Labels LocalVolumes Mounts Names Networks Ports RunningFor Size State Status
+
+$(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,docker,DOCKER__INTERNAL)
+$(call \
+	FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,$\
+	docker-compose,$\
+	DOCKER_COMPOSE__INTERNAL,$\
+	Docker Compose,$\
+	Docker must be installed. docker-compose binary not found in current PATH.$\
+)
+DOCKER_PATH         = $(DOCKER__INTERNAL_PATH)
+DOCKER_COMPOSE_PATH = $(DOCKER_COMPOSE__INTERNAL_PATH)
+
+FN__DOCKER_CONTAINER_STATUS_TEMPLATE = \
+	DOCKER_PREMAKERUN_CONTAINER_UC_IDS += {{upper .ID}}@@EOL@@ $\
+	$(foreach \
+		each_prop,$\
+		$(DOCKER_PS_CONTAINER_PROPERTIES),$\
+		DOCKER_$(1)_CONTAINER__{{upper .ID}}__$(call \
+			FN__TO_UPPER_SNAKE_CASE,$\
+			$(each_prop)$\
+		) = {{.$(each_prop)}}@@EOL@@$\
+	)
+
+FN__EVAL__CAPTURE_DOCKER_CONTAINER_STATUS = \
+	$(DOLLARS)$(OPEN_PAREN)call \
+		FN__DEBUGABLE_EVAL$(COMMA)$\
+		$(DOLLARS)$(OPEN_PAREN)subst \
+			@@EOL@@$(COMMA)$\
+			$(DOLLARS)$(OPEN_PAREN)NEWLINE$(CLOSE_PAREN)$(COMMA)$\
+			$(DOLLARS)$(OPEN_PAREN)subst \
+				@@EOL@@$(DOLLARS)$(OPEN_PAREN)SPACE$(CLOSE_PAREN)$(COMMA)$\
+				@@EOL@@$(COMMA)$\
+				$(DOLLARS)$(OPEN_PAREN)call \
+					FN__DEBUGABLE_SUBSHELL$(COMMA)$\
+					$(DOLLARS)$(OPEN_PAREN)DOCKER__INTERNAL$(CLOSE_PAREN) $\
+						ps -a --format '$(call \
+							FN__DOCKER_CONTAINER_STATUS_TEMPLATE,$\
+							$(1)$\
+						)'$\
+				$(CLOSE_PAREN)$\
+			$(CLOSE_PAREN)$\
+		$(CLOSE_PAREN)$\
+	$(CLOSE_PAREN)
+
+EVAL__INIT_PREMAKERUN_DOCKER_STATUS = \
+	$(DOLLARS)$(OPEN_PAREN)if \
+		$(DOLLARS)$(OPEN_PAREN)call \
+			FN__DEBUGABLE_SUBSHELL$(COMMA)$\
+			$(DOLLARS)$(OPEN_PAREN)DOCKER__INTERNAL$(CLOSE_PAREN) $\
+				info > /dev/null 2> /dev/null && $\
+			echo "Docker ok"$\
+		$(CLOSE_PAREN)$(COMMA)$\
+		$(call \
+			FN__EVAL__CAPTURE_DOCKER_CONTAINER_STATUS,$\
+			PREMAKERUN$\
+		)$(COMMA)$\
+		$(DOLLARS)$(OPEN_PAREN)error \
+			Unable to obtain status info from Docker daemon. $\
+			Please ensure Docker is properly installed and running.$\
+		$(CLOSE_PAREN)$\
+	$(CLOSE_PAREN)$\
+	$(DOLLARS)$(OPEN_PAREN)if \
+		$(DOLLARS)$(OPEN_PAREN)DOCKER_COMPOSE__INTERNAL$(CLOSE_PAREN)$(COMMA)$\
+		$(COMMA)$\
+		$\
+	$(CLOSE_PAREN)
+
+
+$(call \
+	FN__DEFINE_ON_FIRST_USE,$\
+	DOCKER_PREMAKERUN_INITIALIZED,$\
+	$(DOLLARS)$(OPEN_PAREN)call \
+		FN__DEBUGABLE_EVAL$(COMMA)$\
+		$(DOLLARS)$(OPEN_PAREN)EVAL__INIT_PREMAKERUN_DOCKER_STATUS$(CLOSE_PAREN)$\
+	$(CLOSE_PAREN)TRUE$\
+)
+
+DOCKER = \
+	$(if \
+		$(DOCKER_PREMAKERUN_INITIALIZED),$\
+		$(DOCKER__INTERNAL),$\
+		$(error Unreachable!)$\
+	)
+DOCKER_COMPOSE = \
+	$(if \
+		$(DOCKER_PREMAKERUN_INITIALIZED),$\
+		$(DOCKER_COMPOSE__INTERNAL),$\
+		$(error Unreachable!)$\
+	)
+
 
 
 include $(PROJECT_BASE_PATH)/project_info.mk
@@ -191,10 +307,6 @@ $(call FN__DEBUGABLE_EVAL,$\
 
 dev_containers:
 	$(SILENCE_WHEN_NOT_VERBOSE)# $(DOCKER_COMPOSE_PATH)
-	$(SILENCE_WHEN_NOT_VERBOSE)($(DOCKER) info > /dev/null 2> /dev/null) ||  \
-        >&2 $(ECHO) "Unable to obtain status info from Docker daemon. Please" \
-            "ensure Docker is properly installed and running." ; \
-        exit 1
 
 
 $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_PATH)): $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_VERSION_FILE))
