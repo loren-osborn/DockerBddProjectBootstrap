@@ -1403,9 +1403,35 @@ FN__SEARCH_DIR_FOR_PATTERN = \
 	)
 
 
+# FN__GET_NEW_UNIQUE_SYMBOL
+#     Generate a unique symbol name by appending the next value of a
+#     counter to a given prefix string
+#   PARAMETERS:
+#     1: Symbol prefix (defaults to UNIQUE_NAME)
+UNIQUE_SYMBOL_COUNTER__INTERNAL = 1
+FN__GET_NEW_UNIQUE_SYMBOL = \
+	$(if \
+		$(1),$\
+		$(1),$\
+		UNIQUE_NAME$\
+	)_$(lastword $(UNIQUE_SYMBOL_COUNTER__INTERNAL))$\
+	$(call \
+		FN__DEBUGABLE_EVAL,$\
+		$(call \
+			FN__EVAL__DEFINE_MACRO,$\
+			UNIQUE_SYMBOL_COUNTER__INTERNAL,$\
+			$(DOLLARS)$(OPEN_PAREN)words \
+				$(DOLLARS)$(OPEN_PAREN)UNIQUE_SYMBOL_COUNTER__INTERNAL$(CLOSE_PAREN) $\
+					SOME_WORD$\
+			$(CLOSE_PAREN),$\
+			+=$\
+		)$\
+	)
+
 
 # EVAL__FUNC_LIB_MAKEFILE_FOOTER
-#     Generic Makefile targets supporting above functions:
+#     Generic Makefile targets supporting above functions. (This
+#     should be `$(eval ...)` at the end of the Makefile).
 
 define EVAL__FUNC_LIB_MAKEFILE_FOOTER
 

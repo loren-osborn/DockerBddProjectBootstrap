@@ -96,7 +96,7 @@ DOWNLOAD_URL_TO_STDOUT      = \
 # so snapshots from different points of time can be compared.
 
 
-DOCKER_PS_CONTAINER_PROPERTIES = Command CreatedAt ID Image Labels LocalVolumes Mounts Names Networks Ports RunningFor Size State Status
+DOCKER_CONTAINER_PROPERTIES = Command CreatedAt ID Image Labels LocalVolumes Mounts Names Networks Ports RunningFor Size State Status
 
 $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,docker,DOCKER__INTERNAL)
 $(call \
@@ -110,10 +110,10 @@ DOCKER_PATH         = $(DOCKER__INTERNAL_PATH)
 DOCKER_COMPOSE_PATH = $(DOCKER_COMPOSE__INTERNAL_PATH)
 
 FN__DOCKER_CONTAINER_STATUS_TEMPLATE = \
-	DOCKER_PREMAKERUN_CONTAINER_UC_IDS += {{upper .ID}}@@EOL@@ $\
+	DOCKER_$(1)_CONTAINER_UC_IDS += {{upper .ID}}@@EOL@@ $\
 	$(foreach \
 		each_prop,$\
-		$(DOCKER_PS_CONTAINER_PROPERTIES),$\
+		$(DOCKER_CONTAINER_PROPERTIES),$\
 		DOCKER_$(1)_CONTAINER__{{upper .ID}}__$(call \
 			FN__TO_UPPER_SNAKE_CASE,$\
 			$(each_prop)$\
