@@ -1326,7 +1326,7 @@ FN__STRIP_TRAILING_SLASH = \
 #     is taken to avoid double slash or leading `./`. Every directory
 #     in $(1) is combined with every filename/pattern in $(2), so the
 #     word count of the result will be the product of the word count of
-#     the two arguments. 
+#     the two arguments.
 #   PARAMETERS:
 #     1: The directory name to append to
 #     2: The filename to be appended
@@ -1408,7 +1408,7 @@ FN__SEARCH_DIR_FOR_PATTERN = \
 #     counter to a given prefix string
 #   PARAMETERS:
 #     1: Symbol prefix (defaults to UNIQUE_NAME)
-UNIQUE_SYMBOL_COUNTER__INTERNAL = 1
+UNIQUE_SYMBOL_COUNTER__INTERNAL := 1
 FN__GET_NEW_UNIQUE_SYMBOL = \
 	$(if \
 		$(1),$\

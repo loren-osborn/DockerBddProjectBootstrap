@@ -28,6 +28,7 @@ $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,wget)
 
 ### Project paths:
 DEPS_DIR                    = $(PROJECT_BASE_PATH)/deps
+OUTPUT_LOGS_DIR             = $(PROJECT_BASE_PATH)/output
 
 ### Install paths for ShellSpec:
 SHELLSPEC_BASE_INSTALL_DIR  = $(DEPS_DIR)/shellspec
@@ -39,12 +40,8 @@ $(call FN__DEFINE_ON_FIRST_USE,SHELLSPEC_VERSION,$(DOLLARS)$(OPEN_PAREN)call FN_
 SHELLSPEC                   = $(call FN__SIMPLIFY_EXECUTABLE_PATHS,$(SHELLSPEC_BIN_DIR)/shellspec)
 SHELLSPEC_PATH              = $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_BIN_DIR)/shellspec)
 SHELLSPEC_OPTIONS           = --color
-SHELLSPEC_OUTPUT_DIR        = $(PROJECT_BASE_PATH)/output
 SHELLSPEC_REPORT_DIR        = $(PROJECT_BASE_PATH)/report
 SHELLSPEC_COVERAGE_DIR      = $(PROJECT_BASE_PATH)/coverage
-SHELLSPEC_SUCCESS_LOGFILE   = $(SHELLSPEC_OUTPUT_DIR)/shellspec_success.log
-SHELLSPEC_FAILURE_LOGFILE   = $(SHELLSPEC_OUTPUT_DIR)/shellspec_failure.log
-SHELLSPEC_ALL_LOGFILES      = $(SHELLSPEC_SUCCESS_LOGFILE) $(SHELLSPEC_FAILURE_LOGFILE)
 
 # DOWNLOAD_URL_TO_STDOUT autodetects the presence of `curl` or `wget` and
 # produces the correct options to output the contents of the file at the
@@ -92,11 +89,13 @@ DOWNLOAD_URL_TO_STDOUT      = \
 # circumstances.
 
 # Additionally, the routine to capture the docker container state is generalized into
-# a repeatable function with $(call FN__EVAL__CAPTURE_DOCKER_CONTAINER_STATUS,snapshot_name)
+# a repeatable function with $(call FN__EVAL__CAPTURE_DOCKER_SYSTEM_STATUS,snapshot_name)
 # so snapshots from different points of time can be compared.
 
 
 DOCKER_CONTAINER_PROPERTIES = Command CreatedAt ID Image Labels LocalVolumes Mounts Names Networks Ports RunningFor Size State Status
+DOCKER_IMAGE_PROPERTIES     = Containers CreatedAt CreatedSince Digest ID Repository SharedSize Size Tag UniqueSize VirtualSize
+DOCKER_VOLUME_PROPERTIES    = Driver Labels Links Mountpoint Name Scope Size
 
 $(call FN__DEFINE_COMMAND_DISAMBIGUATOR_ON_FIRST_USE,docker,DOCKER__INTERNAL)
 $(call \
@@ -109,18 +108,27 @@ $(call \
 DOCKER_PATH         = $(DOCKER__INTERNAL_PATH)
 DOCKER_COMPOSE_PATH = $(DOCKER_COMPOSE__INTERNAL_PATH)
 
-FN__DOCKER_CONTAINER_STATUS_TEMPLATE = \
-	DOCKER_$(1)_CONTAINER_UC_IDS += {{upper .ID}}@@EOL@@ $\
+FN__DOCKER_OBJECT_STATUS_TEMPLATE = \
+	DOCKER_$(1)_$(2)_UC_IDS += $(3)@@EOL@@ $\
 	$(foreach \
 		each_prop,$\
-		$(DOCKER_CONTAINER_PROPERTIES),$\
-		DOCKER_$(1)_CONTAINER__{{upper .ID}}__$(call \
+		$(DOCKER_$(2)_PROPERTIES),$\
+		DOCKER_$(1)_$(2)__$(3)__$(call \
 			FN__TO_UPPER_SNAKE_CASE,$\
 			$(each_prop)$\
 		) = {{.$(each_prop)}}@@EOL@@$\
 	)
 
-FN__EVAL__CAPTURE_DOCKER_CONTAINER_STATUS = \
+FN__EVAL__CAPTURE_DOCKER_OBJECT_STATUS = \
+	$(DOLLARS)$(OPEN_PAREN)DOCKER__INTERNAL$(CLOSE_PAREN) $\
+		$(4) --format '$(call \
+			FN__DOCKER_OBJECT_STATUS_TEMPLATE,$\
+			$(1),$\
+			$(2),$\
+			$(3)$\
+		)'
+
+FN__EVAL__CAPTURE_DOCKER_SYSTEM_STATUS = \
 	$(DOLLARS)$(OPEN_PAREN)call \
 		FN__DEBUGABLE_EVAL$(COMMA)$\
 		$(DOLLARS)$(OPEN_PAREN)subst \
@@ -131,11 +139,30 @@ FN__EVAL__CAPTURE_DOCKER_CONTAINER_STATUS = \
 				@@EOL@@$(COMMA)$\
 				$(DOLLARS)$(OPEN_PAREN)call \
 					FN__DEBUGABLE_SUBSHELL$(COMMA)$\
-					$(DOLLARS)$(OPEN_PAREN)DOCKER__INTERNAL$(CLOSE_PAREN) $\
-						ps -a --format '$(call \
-							FN__DOCKER_CONTAINER_STATUS_TEMPLATE,$\
-							$(1)$\
-						)'$\
+					$(call \
+						FN__EVAL__CAPTURE_DOCKER_OBJECT_STATUS,$\
+						$(1),$\
+						CONTAINER,$\
+						{{upper .ID}},$\
+						ps --all$\
+					) ; $\
+					$(call \
+						FN__EVAL__CAPTURE_DOCKER_OBJECT_STATUS,$\
+						$(1),$\
+						IMAGE,$\
+						{{upper .ID}},$\
+						images ls --all$\
+					) ; $\
+					$(call \
+						FN__EVAL__CAPTURE_DOCKER_OBJECT_STATUS,$\
+						$(1),$\
+						VOLUME,$\
+						$(DOLLARS)$(OPEN_PAREN)DOLLARS$(CLOSE_PAREN)$(DOLLARS)$(OPEN_PAREN)OPEN_PAREN$(CLOSE_PAREN)call \
+							FN__TO_UPPER_SNAKE_CASE$(DOLLARS)$(OPEN_PAREN)COMMA$(CLOSE_PAREN)$\
+							{{.Name}}$\
+						$(DOLLARS)$(OPEN_PAREN)CLOSE_PAREN$(CLOSE_PAREN),$\
+						volume ls$\
+					)$\
 				$(CLOSE_PAREN)$\
 			$(CLOSE_PAREN)$\
 		$(CLOSE_PAREN)$\
@@ -150,7 +177,7 @@ EVAL__INIT_PREMAKERUN_DOCKER_STATUS = \
 			echo "Docker ok"$\
 		$(CLOSE_PAREN)$(COMMA)$\
 		$(call \
-			FN__EVAL__CAPTURE_DOCKER_CONTAINER_STATUS,$\
+			FN__EVAL__CAPTURE_DOCKER_SYSTEM_STATUS,$\
 			PREMAKERUN$\
 		)$(COMMA)$\
 		$(DOLLARS)$(OPEN_PAREN)error \
@@ -187,126 +214,355 @@ DOCKER_COMPOSE = \
 		$(error Unreachable!)$\
 	)
 
-
-
 include $(PROJECT_BASE_PATH)/project_info.mk
 
+OPERATIONS_STATUSES = success failure
+ALL_TEST_SUITES     = \
+	shellspec $\
+	$(foreach \
+		ea_comp,$\
+		$(PROJECT_DOCKER_COMPOSITION_NAMES),$\
+		$(foreach \
+			ea_cont,$\
+			$(PROJECT__$(ea_comp)__CONTAINER_LABELS),$\
+			$(foreach \
+				ea_suite,$\
+				$(PROJECT__$(ea_comp)__$(ea_cont)__TEST_SUITES),$\
+				$(call \
+					FN__TO_CAMEL_CASE,$\
+					$(ea_comp)$\
+				)_$(call \
+					FN__TO_CAMEL_CASE,$\
+					$(ea_cont)$\
+				)_$(call \
+					FN__TO_CAMEL_CASE,$\
+					$(ea_suite)$\
+				)$\
+			)$\
+		)$\
+	)
 
-# PROJECT_DOCKER_BASE_DIR_APPS = docker_base:my_app
-# FN__EXTRACT_EACH_DOCKER_BASE_RAW_DIR = $\
-# 	$(firstword $\
-# 		$(subst $\
-# 			:,$\
-# 			$(SPACE),$\
-# 			$(1)$\
-# 		)$\
-# 	)
-# FN__EXTRACT_EACH_DOCKER_APP_RAW_DIR_LIST = $\
-# 	$(subst $\
-# 		$(COMMA),$\
-# 		$(SPACE),$\
-# 		$(word $\
-# 			2,$\
-# 			$(subst $\
-# 				:,$\
-# 				$(SPACE),$\
-# 				$(1)$\
-# 			)$\
-# 		)$\
-# 	)
-# FN__PROJ_DOCKER_BASE_DIR = \
-# 	$(foreach \
-# 		base_dir_apps,$\
-# 		$(1),$\
-# 		$(PROJECT_BASE_PATH)/$(call FN__EXTRACT_EACH_DOCKER_BASE_RAW_DIR,$(base_dir_apps))$\
-# 	)
-# FN__PROJ_DOCKER_APP_DIRS = \
-# 	$(foreach \
-# 		base_dir_apps,$\
-# 		$(1),$\
-# 		$(foreach \
-# 			app_dir,$\
-# 			$(call FN__EXTRACT_EACH_DOCKER_APP_RAW_DIR_LIST,$(base_dir_apps)),$\
-# 			$(PROJECT_BASE_PATH)/$(call FN__EXTRACT_EACH_DOCKER_BASE_RAW_DIR,$(base_dir_apps))/$(app_dir)$\
-# 		)$/
-# 	)
-# PROJECT_DOCKER_BASE_DIRS = $(PROJECT_BASE_PATH)/docker_base
-# FN__PROJECT_APP_DIRS     = \
-# 	$(foreach \
-# 		docker_base_path,$\
-# 		$(1),$\
-# 		$(if \
-# 			$(filter \
-# 				$(PROJECT_BASE_PATH)/docker_base,\
-# 				$(docker_base_path)\
-# 			),$\
-# 			$(PROJECT_BASE_PATH)/docker_base/my_app,$\
-# 			$\
-# 		)$\
-# 	)
+FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES = \
+	$(foreach \
+		ea_suite,$\
+		$(1),$\
+		$(foreach \
+			ea_status,$\
+			$(2),$\
+			$(OUTPUT_LOGS_DIR)/$(ea_suite)_$(ea_status).log$\
+		)$\
+	)
 
-SHELLSPEC_OUTPUT_DIRS = $(SHELLSPEC_OUTPUT_DIR) $(SHELLSPEC_REPORT_DIR) $(SHELLSPEC_COVERAGE_DIR)
+ALL_TEST_SUITE_LOGFILES = \
+	$(call \
+		FN_TEST_LOGFILES_FOR_STATUSES_AND_SUITES,$\
+		$(ALL_TEST_SUITES),$\
+		$(OPERATIONS_STATUSES)$\
+	)
 
-GENERATED_DIRS        = $(SHELLSPEC_OUTPUT_DIRS)
+SHELLSPEC_OUTPUT_DIRS = $(SHELLSPEC_REPORT_DIR) $(SHELLSPEC_COVERAGE_DIR)
 
-GENERATED             = $(SHELLSPEC_ALL_LOGFILES) $(GENERATED_DIRS)
+GENERATED_DIRS        = $(OUTPUT_LOGS_DIR) $(SHELLSPEC_OUTPUT_DIRS)
+
+GENERATED             = $(ALL_TEST_SUITE_LOGFILES) $(GENERATED_DIRS)
 
 DOWNLOADED            = $(SHELLSPEC_BASE_INSTALL_DIR)
 
 
 ## Function:
-# FN__EVAL__GENERATE_SHELLSPEC_TESTS_RULE
-#     Generate the Makefile rule to run ShellSpec, so the forced and unforced
-#     rules can share the same recipe can share the same code.
-#     The only difference between the two rules is the target name, and one
-#     additional dependancy: "FORCE"
+# FN__EVAL__GENERATE_SINGLE_GENERIC_TESTS_RULE
+#     Generate the Makefile rule to run test suite, so the rule variations can
+#     have a single source.
 #
 #     We use FN__SH__ENABLE_PIPEFAIL_FOR_COMMAND to detect an error when running
-#     our tests, even though we `tee` them into a log file. If we fail, we rename
-#     the log $(SHELLSPEC_FAILURE_LOGFILE) so make knows the tests have not run
-#     successfully.
+#     our tests, even though we `tee` them into a failure log file. If we succeed,
+#     we rename the log to a success file, so the success file only exists if the
+#     tests ran to completion.
 #   PARAMETERS:
-#     1: The target name
-#     2: Any additional dependancies
+#     1: The test suite name
+#     2: The target name
+#     3: All primary dependancies
+#     4: All dependancy files (the files contents contains a list of dependancies)
+#     5: The command to run to launch the test suite
 
-define FN__EVAL__GENERATE_SHELLSPEC_TESTS_RULE
+define FN__EVAL__GENERATE_SINGLE_GENERIC_TESTS_RULE
 
-$(1): $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC) $(SHELLSPEC_OUTPUT_DIRS) $(2) \
-                         $(wildcard spec/*_spec.sh) \
-                         $(wildcard spec/*_helper.sh) \
-      $(foreach dep_file,$(wildcard spec/*_spec.deps),$(call FN__DEBUGABLE_SUBSHELL,$(CAT) $(dep_file))))
+$(2): $(call \
+	FN__SIMPLIFY_PATHS,$\
+	$(3) $(OUTPUT_LOGS_DIR) $(foreach \
+		dep_file,$\
+		$(4),$\
+		$(dep_file) $(call \
+			FN__DEBUGABLE_SUBSHELL,$\
+			$(CAT) $(dep_file)$\
+		)$\
+	)$\
+)
 	$(SILENCE_WHEN_NOT_VERBOSE)$(call \
 		FN__SH__IF_CONDITION_ECHO_THEN_EXECUTE,$\
-		[ -f "$(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_FAILURE_LOGFILE))" ],$\
-		$(RM) -f "$(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_FAILURE_LOGFILE))"$\
+		[ -f "$(call \
+			FN__SIMPLIFY_PATHS,$\
+			$(call \
+				FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+				$(1),$\
+				failure$\
+			)$\
+		)" ],$\
+		$(RM) -f "$(call \
+			FN__SIMPLIFY_PATHS,$\
+			$(call \
+				FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+				$(1),$\
+				failure$\
+			)$\
+		)"$\
+	)
+	$(SILENCE_WHEN_NOT_VERBOSE)$(call \
+		FN__SH__IF_CONDITION_ECHO_THEN_EXECUTE,$\
+		[ -f "$(call \
+			FN__SIMPLIFY_PATHS,$\
+			$(call \
+				FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+				$(1),$\
+				success$\
+			)$\
+		)" ],$\
+		$(RM) -f "$(call \
+			FN__SIMPLIFY_PATHS,$\
+			$(call \
+				FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+				$(1),$\
+				success$\
+			)$\
+		)"$\
 	)
 	$(call FN__SH__ENABLE_PIPEFAIL_FOR_COMMAND,$\
-		($(SHELLSPEC) $(SHELLSPEC_OPTIONS) | $(TEE) $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_SUCCESS_LOGFILE))) || $\
-		($(MV) $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_SUCCESS_LOGFILE)) $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_FAILURE_LOGFILE)) ; exit 1) $\
+		$(OPEN_PAREN)$\
+			$(5) | $(TEE) $(call \
+				FN__SIMPLIFY_PATHS,$\
+				$(call \
+					FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+					$(1),$\
+					failure$\
+				)$\
+			)$\
+		$(CLOSE_PAREN) && $(OPEN_PAREN)$\
+			$(MV) $(call \
+				FN__SIMPLIFY_PATHS,$\
+				$(call \
+					FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+					$(1),$\
+					failure$\
+				)$\
+			) $(call \
+				FN__SIMPLIFY_PATHS,$\
+				$(call \
+					FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+					$(1),$\
+					success$\
+				)$\
+			)$\
+		$(CLOSE_PAREN) $\
 	)
 
 
 endef
 
+
+## Function:
+# FN__EVAL__GENERATE_GENERIC_TESTS_RULE_PAIR
+#     Generate pair of Makefile rules to run a generic test suite. The rule details
+#     are defined in FN__EVAL__GENERATE_SINGLE_GENERIC_TESTS_RULE so the forced and
+#     unforced rules can share the same recipe code. The only difference between
+#     the two rules is the target name, and one additional dependancy: "FORCE"
+#   PARAMETERS:
+#     1: The test suite name
+#     2: All primary dependancies
+#     3: All dependancy files (the files contents contains a list of dependancies)
+#     4: The command to run to launch the test suite
+
+FN__EVAL__GENERATE_GENERIC_TESTS_RULE_PAIR = \
+	$(call \
+		FN__EVAL__GENERATE_SINGLE_GENERIC_TESTS_RULE,$\
+		$(1),$\
+		$(call \
+			FN__SIMPLIFY_PATHS,$\
+			$(call \
+				FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+				$(1),$\
+				success$\
+			)),$\
+		$(2),$\
+		$(3),$\
+		$(4)$\
+	) $\
+	$(call \
+		FN__EVAL__GENERATE_SINGLE_GENERIC_TESTS_RULE,$\
+		$(1),$\
+		test_$(1)_force,$\
+		$(2) FORCE,$\
+		$(3),$\
+		$(4)$\
+	)
+
+
+ALL_TEST_SUITE_LOGFILES = \
+	$(foreach \
+		ea_suite,$\
+		$(ALL_TEST_SUITES),$\
+		$(foreach \
+			ea_status,$\
+			$(OPERATIONS_STATUSES),$\
+			$(call \
+				FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+				$(ea_suite),$\
+				$(ea_status)$\
+			)$\
+		)$\
+	)
+
 all default: test_cachable
 
 # This is (in theory) a list of all Makefile targets that don't correspond
-# to filesystem files. 
-.PHONY: all default test test_cachable test_force clean dist_clean dev_containers $(FUNC_LIB_PHONY_TARGETS)
+# to filesystem files.
+.PHONY: all default test test_cachable test_force clean dist_clean dev_containers \
+	$(foreach ea_suite,$(ALL_TEST_SUITES),test_$(ea_suite)_force) $(FUNC_LIB_PHONY_TARGETS)
 
 test: test_force
 
-test_cachable: $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_SUCCESS_LOGFILE))
+test_cachable: $(call \
+		FN__SIMPLIFY_PATHS,$\
+		$(foreach \
+			ea_suite,$\
+			$(ALL_TEST_SUITES),$\
+			$(call \
+				FN_TEST_LOGFILES_FOR_SUITES_AND_STATUSES,$\
+				$(ea_suite),$\
+				success$\
+			)$\
+		)$\
+	)
+
+test_force: $(foreach ea_suite,$(ALL_TEST_SUITES),test_$(ea_suite)_force)
 
 
-$(call FN__DEBUGABLE_EVAL,$\
-        $(call FN__EVAL__GENERATE_SHELLSPEC_TESTS_RULE,$(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_SUCCESS_LOGFILE)),) \
-        $(call FN__EVAL__GENERATE_SHELLSPEC_TESTS_RULE,test_force,FORCE) \
-        $(foreach dir_name,$(GENERATED_DIRS),$(call FN__EVAL__GENERATE_AUTOCREATED_DIRECTORY_RULE,$(dir_name))))
+$(call \
+	FN__DEBUGABLE_EVAL,$\
+	$(call \
+		FN__EVAL__GENERATE_GENERIC_TESTS_RULE_PAIR,$\
+		shellspec,$\
+		$(SHELLSPEC) $(SHELLSPEC_OUTPUT_DIRS) $\
+			$(wildcard spec/*_spec.sh) $(wildcard spec/*_helper.sh),$\
+		$(wildcard spec/*_spec.deps),$\
+		$(SHELLSPEC) $(SHELLSPEC_OPTIONS)$\
+	) $\
+	$(foreach \
+		ea_comp,$\
+		$(PROJECT_DOCKER_COMPOSITION_NAMES),$\
+		$(foreach \
+			ea_cont,$\
+			$(PROJECT__$(ea_comp)__CONTAINER_LABELS),$\
+			$(foreach \
+				ea_suite,$\
+				$(PROJECT__$(ea_comp)__$(ea_cont)__TEST_SUITES),$\
+				$(call \
+					FN__EVAL__GENERATE_GENERIC_TESTS_RULE_PAIR,$\
+					$(call \
+						FN__TO_CAMEL_CASE,$\
+						$(ea_comp)$\
+					)_$(call \
+						FN__TO_CAMEL_CASE,$\
+						$(ea_cont)$\
+					)_$(call \
+						FN__TO_CAMEL_CASE,$\
+						$(ea_suite)$\
+					),$\
+					$(call \
+						FN__SIMPLIFY_PATHS,$\
+						$(call \
+							FN__SEARCH_DIR_FOR_PATTERN,$\
+							$(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__PROJECT_DIR),$\
+							*,$\
+							$\
+						)$\
+					),$\
+					$(wildcard $(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__PROJECT_DIR)/*.deps), $\
+					$(DOLLARS)$(OPEN_PAREN)DOCKER_COMPOSE$(CLOSE_PAREN) $\
+						$(if \
+							$(PROJECT__$(ea_comp)__DOCKER_COMPOSE_FILE),$\
+							$(if \
+								$(filter 1,$(words $(PROJECT__$(ea_comp)__DOCKER_COMPOSE_FILE))),$\
+								,$\
+								$(error Docker composition $(call \
+									FN__TO_CAMEL_CASE,$\
+									$(ea_comp)$\
+								) is only allowed one docker-compose file.)$\
+							)--file $(call \
+								FN__SIMPLIFY_PATHS,$\
+								$(PROJECT__$(ea_comp)__DOCKER_COMPOSE_FILE)$\
+							)$(SPACE),$\
+							$\
+						)$\
+						run --rm $(PROJECT__$(ea_comp)__$(ea_suite)__NAME) $\
+						$(if \
+							$(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__CONTAINER_DIR),$\
+							$(if \
+								$(filter 1,$(words $(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__CONTAINER_DIR))),$\
+								,$\
+								$(error Test suite $(call \
+									FN__TO_CAMEL_CASE,$\
+									$(ea_comp)$\
+								)_$(call \
+									FN__TO_CAMEL_CASE,$\
+									$(ea_cont)$\
+								)_$(call \
+									FN__TO_CAMEL_CASE,$\
+									$(ea_suite)$\
+								) is only allowed one working direcory)$\
+							)--workdir $(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__CONTAINER_DIR)$(SPACE),$\
+							$\
+						)$\
+						$(if \
+							$(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__CONTAINER_USER),$\
+							$(if \
+								$(filter 1,$(words $(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__CONTAINER_USER))),$\
+								,$\
+								$(error Test suite $(call \
+									FN__TO_CAMEL_CASE,$\
+									$(ea_comp)$\
+								)_$(call \
+									FN__TO_CAMEL_CASE,$\
+									$(ea_cont)$\
+								)_$(call \
+									FN__TO_CAMEL_CASE,$\
+									$(ea_suite)$\
+								) is only allowed one current user)$\
+							)--user $(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__CONTAINER_USER)$(SPACE),$\
+							$\
+						)$\
+						$(foreach \
+							ea_vol,$\
+							$(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__CONTAINER_VOLUMES),$\
+							--volume $(ea_vol)$(SPACE)$\
+						)$\
+						$(PROJECT__$(ea_comp)__$(ea_cont)__$(ea_suite)__LAUNCH_COMMAND)$\
+				)$\
+			)$\
+		)$\
+	) $\
+	$(foreach \
+		dir_name,$\
+		$(GENERATED_DIRS),$\
+		$(call \
+			FN__EVAL__GENERATE_AUTOCREATED_DIRECTORY_RULE,$\
+			$(dir_name)$\
+		)$\
+	)$\
+)
 
 
-dev_containers:
-	$(SILENCE_WHEN_NOT_VERBOSE)# $(DOCKER_COMPOSE_PATH)
+# dev_containers:
+# 	$(SILENCE_WHEN_NOT_VERBOSE)# $(DOCKER_COMPOSE_PATH)
 
 
 $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_PATH)): $(call FN__SIMPLIFY_PATHS,$(SHELLSPEC_VERSION_FILE))
