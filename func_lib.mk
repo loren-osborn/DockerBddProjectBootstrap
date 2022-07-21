@@ -15,7 +15,7 @@ SILENT_MODE                         := $(findstring s,$(word 1, $(MAKEFLAGS)))
 VERBOSE_MODE                        := $(filter verbose,$(MAKECMDGOALS))
 SILENCE_WHEN_NOT_VERBOSE            := $(if $(VERBOSE_MODE),,@)
 
-# VERBOSE_DEBUG_MODEis implemented exactly like VERBOSE_MODE, but instead of showing
+# VERBOSE_DEBUG_MODE is implemented exactly like VERBOSE_MODE, but instead of showing
 # recipe commands that would otherwise be silenced, it shows code executed by
 # $(MAKE) in $(eval ...) and $(shell ...) functions.
 VERBOSE_DEBUG_MODE                  := $(filter verbose_debug,$(MAKECMDGOALS))
