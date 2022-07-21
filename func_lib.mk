@@ -214,6 +214,9 @@ FN__IS_RELATIVE_PATH = $(if $(patsubst /%,,$(1)),RELATIVE,)
 #     prefaces these with `./` where FN__SIMPLIFY_PATHS does not.
 #   PARAMETERS:
 #     1: The list of paths
+
+# Add these two 2: PWD of $(1)
+#               3: PWD of result
 FN__SIMPLIFY_PATHS = \
 	$(foreach \
 		each_path,$\
@@ -247,6 +250,7 @@ FN__SIMPLIFY_PATHS = \
 			$(each_path)$\
 		)$\
 	)
+# Change this to reuse code from FN__SIMPLIFY_PATHS:
 FN__SIMPLIFY_EXECUTABLE_PATHS = \
 	$(foreach \
 		each_path,$\
